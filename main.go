@@ -3,11 +3,13 @@ package main
 import (
 	"context"
 	"flag"
-	"fmt"
 	"io"
 	"io/ioutil"
 	"log"
 	"net/http"
+	"path"
+	"path/filepath"
+	"strings"
 	"time"
 
 	yaml "gopkg.in/yaml.v2"
@@ -16,21 +18,22 @@ import (
 )
 
 var (
-	configPath = flag.String("config", "config.yml", "The path of the config file")
-	zenoAddr   = flag.String("zenoaddr", "", "The ZenoDB address to which to connect with gRPC over TLS")
-	password   = flag.String("password", "", "The password used to authenticate against ZenoDB server")
-	addr       = flag.String("addr", "", "The address to which the exporter HTTP service listens on")
-	path       = flag.String("path", "/metrics", "The HTTP path to export the metrics")
+	jobsPath = flag.String("jobspath", ".", "The path of the job definitions. *.yaml files under the path will be loaded.")
+	zenoAddr = flag.String("zenoaddr", "", "The ZenoDB address to which to connect with gRPC over TLS")
+	password = flag.String("password", "", "The password used to authenticate against ZenoDB server")
+	addr     = flag.String("addr", "", "The address to which the exporter HTTP service listens on")
 )
 
-var config *Config
+var jobs map[string]Job = make(map[string]Job)
 var client rpc.Client
+
+const defaultJobTimeout = 3 * time.Minute
 
 func main() {
 	flag.Parse()
 	checkFlags()
 	var err error
-	config, err = loadConfig(*configPath)
+	err = loadJobs(*jobsPath)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -39,8 +42,8 @@ func main() {
 		log.Fatal(err)
 	}
 
-	http.Handle(*path, http.HandlerFunc(handleMetrics))
-	fmt.Printf("Starting Zeno Query Exporter at %s\n", *addr)
+	http.Handle("/metrics", http.HandlerFunc(handleMetrics))
+	log.Printf("Starting Zeno Query Exporter at %s", *addr)
 	log.Fatal(http.ListenAndServe(*addr, nil))
 }
 
@@ -56,32 +59,57 @@ func checkFlags() {
 	}
 }
 
-func loadConfig(path string) (*Config, error) {
-	b, err := ioutil.ReadFile(path)
+func loadJobs(jobsPath string) error {
+	files, err := filepath.Glob(path.Join(jobsPath, "*.yaml"))
 	if err != nil {
-		return nil, err
+		return err
 	}
-	var config Config
-	err = yaml.Unmarshal(b, &config)
-	if err != nil {
-		return nil, err
+	for _, p := range files {
+		fname := path.Base(p)
+		name := strings.Split(fname, ".")[0]
+		b, err := ioutil.ReadFile(p)
+		if err != nil {
+			return err
+		}
+		var job Job
+		err = yaml.Unmarshal(b, &job)
+		if err != nil {
+			return err
+		}
+		log.Printf("Loaded job '%s'", name)
+		jobs[name] = job
 	}
-	return &config, nil
+	return nil
 }
 
 func handleMetrics(rw http.ResponseWriter, req *http.Request) {
 	name := req.URL.Query().Get("job")
 	if name == "" {
 		rw.WriteHeader(http.StatusBadRequest)
-		io.WriteString(rw, "missing job parameter")
+		io.WriteString(rw, "job not specified\n")
 		return
 	}
-	job, exists := config.Jobs[name]
+	job, exists := jobs[name]
 	if !exists {
 		rw.WriteHeader(http.StatusNotFound)
-		io.WriteString(rw, "job not found")
+		io.WriteString(rw, "job not found\n")
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
+	to := req.URL.Query().Get("timeout")
+	timeout, err := time.ParseDuration(to)
+	if err != nil {
+		timeout = defaultJobTimeout
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
-	runJob(ctx, client, job, rw)
+	err = runJob(ctx, client, job, rw)
+	if err != nil {
+		select {
+		case <-ctx.Done():
+			rw.WriteHeader(http.StatusGatewayTimeout)
+			log.Printf("Job '%s' timed out", name)
+		default:
+			rw.WriteHeader(http.StatusInternalServerError)
+			log.Printf("Job '%s' failed: %v", name, err)
+		}
+	}
 }

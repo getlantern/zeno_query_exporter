@@ -99,7 +99,7 @@ func runJob(ctx context.Context, client rpc.Client, job Job, out io.Writer) erro
 
 		for i, v := range row.Values {
 			if metric, exists := idxToMetric[i]; exists {
-				writeMetric(out, float64(v), row.TS, metric, labels)
+				writeMetric(out, float64(v), row.TS/1000000, metric, labels)
 			}
 		}
 		return true, nil
