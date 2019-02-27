@@ -12,3 +12,4 @@
 *.out
 
 *.yaml
+zeno_query_exporter
