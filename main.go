@@ -83,7 +83,8 @@ func loadJobs(jobsPath string) error {
 }
 
 func handleMetrics(rw http.ResponseWriter, req *http.Request) {
-	name := req.URL.Query().Get("job")
+	query := req.URL.Query()
+	name := query.Get("job")
 	if name == "" {
 		rw.WriteHeader(http.StatusBadRequest)
 		io.WriteString(rw, "job not specified\n")
@@ -94,14 +95,19 @@ func handleMetrics(rw http.ResponseWriter, req *http.Request) {
 		rw.WriteHeader(http.StatusNotFound)
 		io.WriteString(rw, "job not found\n")
 	}
-	to := req.URL.Query().Get("timeout")
-	timeout, err := time.ParseDuration(to)
+	timeout, err := time.ParseDuration(query.Get("timeout"))
 	if err != nil {
 		timeout = defaultJobTimeout
 	}
+	query.Del("job")
+	query.Del("timeout")
+	params := make(map[string]string)
+	for k, l := range query {
+		params[k] = l[0]
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
-	err = runJob(ctx, client, job, rw)
+	err = runJob(ctx, client, job, params, rw)
 	if err != nil {
 		select {
 		case <-ctx.Done():

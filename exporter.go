@@ -1,11 +1,13 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"crypto/tls"
 	"fmt"
 	"io"
 	"net"
+	"text/template"
 	"time"
 
 	"github.com/getlantern/zenodb/core"
@@ -66,14 +68,27 @@ func createClient(addr, password string) (rpc.Client, error) {
 	})
 }
 
-func runJob(ctx context.Context, client rpc.Client, job Job, out io.Writer) error {
+func runJob(ctx context.Context, client rpc.Client, job Job, params map[string]string, out io.Writer) error {
 	if job.RenameDims == nil {
 		job.RenameDims = make(map[string]string)
 	}
 	for _, dim := range job.IgnoreDims {
 		job.RenameDims[dim] = ""
 	}
-	md, iterate, err := client.Query(ctx, job.Query, false /*fresh*/)
+	query := job.Query
+	if len(params) > 0 {
+		t, err := template.New("").Parse(job.Query)
+		if err != nil {
+			return err
+		}
+		var buf bytes.Buffer
+		if err = t.Execute(&buf, params); err != nil {
+			return err
+		}
+		query = buf.String()
+		fmt.Printf("Executing query:\n%s", query)
+	}
+	md, iterate, err := client.Query(ctx, query, false /*fresh*/)
 	if err != nil {
 		return err
 	}
