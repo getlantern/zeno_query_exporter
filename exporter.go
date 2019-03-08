@@ -88,11 +88,11 @@ func runJob(ctx context.Context, client rpc.Client, job Job, params map[string]s
 		query = buf.String()
 		fmt.Printf("Executing query:\n%s", query)
 	}
-	md, iterate, err := client.Query(ctx, query, false /*fresh*/)
+	md, iterate, err := client.Query(ctx, query, true /*fresh*/)
 	if err != nil {
 		return err
 	}
-	_, err = iterate(func(row *core.FlatRow) (bool, error) {
+	stats, err := iterate(func(row *core.FlatRow) (bool, error) {
 		labels := make(map[string]string)
 		for dim, value := range row.Key.AsMap() {
 			vs := fmt.Sprintf("%v", value)
@@ -119,6 +119,13 @@ func runJob(ctx context.Context, client rpc.Client, job Job, params map[string]s
 		}
 		return true, nil
 	})
+	if err != nil {
+		return err
+	}
+	if *strict && stats.NumSuccessfulPartitions < stats.NumPartitions {
+		return fmt.Errorf("missing partitions: %v", stats.MissingPartitions)
+	}
+
 	return nil
 }
 

@@ -22,6 +22,7 @@ var (
 	zenoAddr = flag.String("zenoaddr", "", "The ZenoDB address to which to connect with gRPC over TLS")
 	password = flag.String("password", "", "The password used to authenticate against ZenoDB server")
 	addr     = flag.String("addr", "", "The address to which the exporter HTTP service listens on")
+	strict   = flag.Bool("strict", true, "if specified, raises error when there are missing data from 1 or more partitions")
 )
 
 var jobs map[string]Job = make(map[string]Job)
@@ -94,6 +95,7 @@ func handleMetrics(rw http.ResponseWriter, req *http.Request) {
 	if !exists {
 		rw.WriteHeader(http.StatusNotFound)
 		io.WriteString(rw, "job not found\n")
+		return
 	}
 	timeout, err := time.ParseDuration(query.Get("timeout"))
 	if err != nil {
