@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"flag"
 	"io"
@@ -109,15 +110,21 @@ func handleMetrics(rw http.ResponseWriter, req *http.Request) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
-	err = runJob(ctx, client, job, params, rw)
+	// We could write directly to the ResponseWriter rather than the buffer,
+	// but it would make responding other HTTP status codes impossible.
+	var buf bytes.Buffer
+	err = runJob(ctx, client, job, params, &buf)
 	if err != nil {
 		select {
 		case <-ctx.Done():
 			rw.WriteHeader(http.StatusGatewayTimeout)
 			log.Printf("Job '%s' timed out", name)
+			return
 		default:
 			rw.WriteHeader(http.StatusInternalServerError)
 			log.Printf("Job '%s' failed: %v", name, err)
+			return
 		}
 	}
+	buf.WriteTo(rw)
 }
