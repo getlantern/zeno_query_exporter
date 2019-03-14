@@ -48,6 +48,16 @@ type Config struct {
 	Jobs map[string]Job
 }
 
+var metricTotalPartitions = &Metric{
+	Name: "zeno_query_exporter_zeno_partitions_total",
+	Type: gauge,
+}
+
+var metricMissingPartitions = &Metric{
+	Name: "zeno_query_exporter_zeno_partitions_missing",
+	Type: gauge,
+}
+
 func createClient(addr, password string) (rpc.Client, error) {
 	host, _, _ := net.SplitHostPort(addr)
 	tlsConfig := &tls.Config{
@@ -68,7 +78,7 @@ func createClient(addr, password string) (rpc.Client, error) {
 	})
 }
 
-func runJob(ctx context.Context, client rpc.Client, job Job, params map[string]string, out io.Writer) error {
+func runJob(ctx context.Context, client rpc.Client, name string, job Job, params map[string]string, out io.Writer) error {
 	if job.RenameDims == nil {
 		job.RenameDims = make(map[string]string)
 	}
@@ -122,9 +132,10 @@ func runJob(ctx context.Context, client rpc.Client, job Job, params map[string]s
 	if err != nil {
 		return err
 	}
-	if *strict && stats.NumSuccessfulPartitions < stats.NumPartitions {
-		return fmt.Errorf("missing partitions: %v", stats.MissingPartitions)
-	}
+	labels := map[string]string{"job": name}
+	ts := time.Now().UnixNano() / 1000000
+	writeMetric(out, float64(stats.NumPartitions), ts, metricTotalPartitions, labels)
+	writeMetric(out, float64(stats.NumPartitions-stats.NumSuccessfulPartitions), ts, metricMissingPartitions, labels)
 
 	return nil
 }

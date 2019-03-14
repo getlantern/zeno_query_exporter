@@ -23,7 +23,6 @@ var (
 	zenoAddr = flag.String("zenoaddr", "", "The ZenoDB address to which to connect with gRPC over TLS")
 	password = flag.String("password", "", "The password used to authenticate against ZenoDB server")
 	addr     = flag.String("addr", "", "The address to which the exporter HTTP service listens on")
-	strict   = flag.Bool("strict", true, "if specified, raises error when there are missing data from 1 or more partitions")
 )
 
 var jobs map[string]Job = make(map[string]Job)
@@ -113,7 +112,7 @@ func handleMetrics(rw http.ResponseWriter, req *http.Request) {
 	// We could write directly to the ResponseWriter rather than the buffer,
 	// but it would make responding other HTTP status codes impossible.
 	var buf bytes.Buffer
-	err = runJob(ctx, client, job, params, &buf)
+	err = runJob(ctx, client, name, job, params, &buf)
 	if err != nil {
 		select {
 		case <-ctx.Done():
